@@ -9,6 +9,7 @@ import (
 
 	"github.com/bojin/datamask/internal/config"
 	"github.com/bojin/datamask/internal/database"
+	"github.com/bojin/datamask/internal/storage"
 	"github.com/bojin/datamask/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +22,9 @@ database to verify schema compatibility, type safety, and preview transform resu
 
 Available checks:
   config  - Validate YAML syntax, transformer names, and config consistency
-  schema  - Compare config references against actual database schema
+  schema  - Compare config references against actual database schema; if --dump-id is
+            provided, also diffs the dump's stored schema against the live database to
+            detect added/removed/changed tables and columns
   types   - Check transformer/column type compatibility
   diff    - Preview before/after transformation on sample rows`,
 	RunE: runValidate,
@@ -32,6 +35,7 @@ func init() {
 	validateCmd.Flags().StringSlice("check", nil, "specific checks to run (config,schema,types,diff); defaults to all")
 	validateCmd.Flags().Int("sample-rows", 5, "number of rows to sample for diff check")
 	validateCmd.Flags().String("dsn", "", "override connection DSN from config")
+	validateCmd.Flags().String("dump-id", "", "compare this dump's schema against live database for drift detection")
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
@@ -47,6 +51,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	sampleRows, _ := cmd.Flags().GetInt("sample-rows")
 	checks, _ := cmd.Flags().GetStringSlice("check")
+	dumpID, _ := cmd.Flags().GetString("dump-id")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -77,6 +82,15 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	v := validate.New(cfg, db, dsn, sampleRows)
+
+	// If dump-id provided, wire it for schema diff
+	if dumpID != "" {
+		store, err := storage.New(cfg.StorageDir)
+		if err != nil {
+			return fmt.Errorf("initializing storage: %w", err)
+		}
+		v.SetDumpReference(store, dumpID)
+	}
 
 	var findings []validate.Finding
 	if len(checks) == 0 {

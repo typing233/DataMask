@@ -6,6 +6,7 @@ import (
 
 	"github.com/bojin/datamask/internal/config"
 	"github.com/bojin/datamask/internal/database"
+	"github.com/bojin/datamask/internal/storage"
 )
 
 type Severity int
@@ -47,6 +48,8 @@ type Validator struct {
 	db         database.Database
 	dsn        string
 	sampleRows int
+	store      *storage.Store
+	dumpID     string
 }
 
 func New(cfg *config.Config, db database.Database, dsn string, sampleRows int) *Validator {
@@ -56,6 +59,12 @@ func New(cfg *config.Config, db database.Database, dsn string, sampleRows int) *
 		dsn:        dsn,
 		sampleRows: sampleRows,
 	}
+}
+
+// SetDumpReference configures a dump to compare schema against.
+func (v *Validator) SetDumpReference(store *storage.Store, dumpID string) {
+	v.store = store
+	v.dumpID = dumpID
 }
 
 func (v *Validator) RunAll(ctx context.Context) []Finding {

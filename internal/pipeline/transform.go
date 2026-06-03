@@ -31,28 +31,41 @@ func TransformRowTyped(line string, columns []string, columnTypes []string, tabl
 			colType = columnTypes[i]
 		}
 
-		// Decode: verify the raw value is valid for this column type
-		_, err := registry.Decode(fields[i], colType)
-		if err != nil {
-			return "", fmt.Errorf("column %q (type %s): decode error: %w", colName, colType, err)
-		}
-
-		// Transform: transformer works on the raw COPY text value
-		val, err := t.Transform(fields[i], transformer.ColumnInfo{
+		col := transformer.ColumnInfo{
 			TableName:  tableName,
 			ColumnName: colName,
 			DataType:   colType,
 			Position:   i,
-		})
-		if err != nil {
-			return "", fmt.Errorf("column %q: transform error: %w", colName, err)
 		}
 
-		// Encode: verify the transformed output is valid for this column type
-		encodedVal := &codec.Value{Native: val}
-		encoded, err := registry.Encode(encodedVal, colType)
+		// Decode: convert raw COPY text to native Go type
+		decoded, err := registry.Decode(fields[i], colType)
 		if err != nil {
-			return "", fmt.Errorf("column %q (type %s): encode error after transform: value %q is not valid for type: %w", colName, colType, val, err)
+			return "", fmt.Errorf("column %q (type %s): decode error: %w", colName, colType, err)
+		}
+
+		var result *codec.Value
+
+		// If transformer implements TypedTransformer, pass decoded native value
+		if typed, ok := t.(transformer.TypedTransformer); ok {
+			native, err := typed.TransformTyped(decoded.Native, col)
+			if err != nil {
+				return "", fmt.Errorf("column %q: typed transform error: %w", colName, err)
+			}
+			result = &codec.Value{Native: native}
+		} else {
+			// Fallback: pass raw string to Transform, then wrap result for encoding
+			val, err := t.Transform(fields[i], col)
+			if err != nil {
+				return "", fmt.Errorf("column %q: transform error: %w", colName, err)
+			}
+			result = &codec.Value{Native: val}
+		}
+
+		// Encode: convert native value back to COPY text format
+		encoded, err := registry.Encode(result, colType)
+		if err != nil {
+			return "", fmt.Errorf("column %q (type %s): encode error after transform: value %v is not valid for type: %w", colName, colType, result.Native, err)
 		}
 		fields[i] = encoded
 	}

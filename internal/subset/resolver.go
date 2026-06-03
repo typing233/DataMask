@@ -36,17 +36,10 @@ func (r *Resolver) Resolve(ctx context.Context) (map[string]*bytes.Buffer, error
 		}
 	}
 
-	// Phase 2: BFS resolve parents (tables this row references via FK)
-	if r.config.ResolveParents {
-		if err := r.resolveDirection(ctx, dirParent); err != nil {
-			return nil, fmt.Errorf("resolving parent dependencies: %w", err)
-		}
-	}
-
-	// Phase 3: BFS resolve children (tables that reference our rows via FK)
-	if r.config.ResolveChildren {
-		if err := r.resolveDirection(ctx, dirChild); err != nil {
-			return nil, fmt.Errorf("resolving child dependencies: %w", err)
+	// Phase 2: Unified BFS resolving both parents and children to fixed point
+	if r.config.ResolveParents || r.config.ResolveChildren {
+		if err := r.resolveToFixedPoint(ctx); err != nil {
+			return nil, fmt.Errorf("resolving dependencies: %w", err)
 		}
 	}
 
@@ -60,60 +53,63 @@ const (
 	dirChild
 )
 
-func (r *Resolver) resolveDirection(ctx context.Context, dir resolveDir) error {
-	// Start from all tables that have data
-	pending := make([]string, 0)
-	for tableName, buf := range r.results {
-		if buf.Len() > 0 {
-			pending = append(pending, tableName)
-		}
-	}
+func (r *Resolver) resolveToFixedPoint(ctx context.Context) error {
+	iteration := 0
+	for iteration < r.config.MaxDepth {
+		newDataFound := false
 
-	depth := 0
-	for len(pending) > 0 && depth < r.config.MaxDepth {
-		var nextPending []string
-		processedThisRound := make(map[string]bool)
-
-		for _, tableName := range pending {
-			var deps []Dependency
-			if dir == dirParent {
-				deps = r.plan.ParentDeps[tableName]
-			} else {
-				deps = r.plan.ChildDeps[tableName]
-			}
-
-			for _, dep := range deps {
-				var targetTable string
-				if dir == dirParent {
-					targetTable = dep.ToTable
-				} else {
-					targetTable = dep.FromTable
-				}
-
-				// Skip if cyclic and already has data (avoid infinite loops)
-				if r.plan.CyclicTables[targetTable] && r.hasData(targetTable) {
-					continue
-				}
-
-				where := r.buildDependencyWhere(tableName, dep, dir)
-				if where == "" {
-					continue
-				}
-
-				prevLen := r.bufferLen(targetTable)
-				if err := r.extractTable(ctx, targetTable, where); err != nil {
-					continue
-				}
-
-				// Only schedule for further traversal if new data was added
-				if r.bufferLen(targetTable) > prevLen && !processedThisRound[targetTable] {
-					nextPending = append(nextPending, targetTable)
-					processedThisRound[targetTable] = true
-				}
+		// Snapshot current tables with data to iterate over
+		tablesToProcess := make([]string, 0)
+		for tableName, buf := range r.results {
+			if buf.Len() > 0 {
+				tablesToProcess = append(tablesToProcess, tableName)
 			}
 		}
-		pending = nextPending
-		depth++
+
+		for _, tableName := range tablesToProcess {
+			// Resolve parent dependencies
+			if r.config.ResolveParents {
+				for _, dep := range r.plan.ParentDeps[tableName] {
+					targetTable := dep.ToTable
+					where := r.buildDependencyWhere(tableName, dep, dirParent)
+					if where == "" {
+						continue
+					}
+
+					prevLen := r.bufferLen(targetTable)
+					if err := r.extractTable(ctx, targetTable, where); err != nil {
+						return fmt.Errorf("resolving parent %s for %s: %w", targetTable, tableName, err)
+					}
+					if r.bufferLen(targetTable) > prevLen {
+						newDataFound = true
+					}
+				}
+			}
+
+			// Resolve child dependencies
+			if r.config.ResolveChildren {
+				for _, dep := range r.plan.ChildDeps[tableName] {
+					targetTable := dep.FromTable
+					where := r.buildDependencyWhere(tableName, dep, dirChild)
+					if where == "" {
+						continue
+					}
+
+					prevLen := r.bufferLen(targetTable)
+					if err := r.extractTable(ctx, targetTable, where); err != nil {
+						return fmt.Errorf("resolving child %s for %s: %w", targetTable, tableName, err)
+					}
+					if r.bufferLen(targetTable) > prevLen {
+						newDataFound = true
+					}
+				}
+			}
+		}
+
+		iteration++
+		if !newDataFound {
+			break
+		}
 	}
 	return nil
 }

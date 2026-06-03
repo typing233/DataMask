@@ -16,6 +16,10 @@ func (r *randomInt) Transform(value string, col ColumnInfo) (string, error) {
 	return strconv.Itoa(n), nil
 }
 
+func (r *randomInt) TransformTyped(value interface{}, col ColumnInfo) (interface{}, error) {
+	return int64(rand.Intn(1000000)), nil
+}
+
 func (r *randomInt) Description() string {
 	return "Replaces value with a random integer between 0 and 999999"
 }
