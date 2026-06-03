@@ -83,7 +83,12 @@ func (s *Store) LoadMetadata(dumpID string) (*DumpMetadata, error) {
 }
 
 func (s *Store) SchemaPath(dumpID string) string {
-	return filepath.Join(s.baseDir, dumpID, "schema.sql")
+	metaPath := filepath.Join(s.baseDir, dumpID, "metadata.json")
+	meta, err := loadMetadataFile(metaPath)
+	if err != nil || meta.SchemaFile == "" {
+		return filepath.Join(s.baseDir, dumpID, "schema.dump")
+	}
+	return filepath.Join(s.baseDir, dumpID, meta.SchemaFile)
 }
 
 func (s *Store) DataFilePath(dumpID, dataFile string) string {

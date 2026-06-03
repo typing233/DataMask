@@ -38,10 +38,14 @@ func (c ConnectionConfig) DSN() string {
 	}
 	sslmode := c.SSLMode
 	if sslmode == "" {
-		sslmode = "prefer"
+		sslmode = "disable"
 	}
-	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		c.Host, port, c.User, c.Password, c.DBName, sslmode)
+	dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=%s",
+		c.Host, port, c.User, c.DBName, sslmode)
+	if c.Password != "" {
+		dsn += fmt.Sprintf(" password=%s", c.Password)
+	}
+	return dsn
 }
 
 func Load(path string) (*Config, error) {

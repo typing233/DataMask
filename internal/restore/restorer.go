@@ -46,7 +46,7 @@ func (r *Restorer) Run(ctx context.Context, dumpID string) error {
 		fmt.Println("done")
 	}
 
-	fmt.Print("Restoring schema via psql... ")
+	fmt.Print("Restoring schema via pg_restore... ")
 	if err := r.restoreSchema(ctx, dumpID); err != nil {
 		return fmt.Errorf("restoring schema: %w", err)
 	}
@@ -102,17 +102,19 @@ func (r *Restorer) resetSchema(ctx context.Context) error {
 }
 
 func (r *Restorer) restoreSchema(ctx context.Context, dumpID string) error {
-	if _, err := exec.LookPath("psql"); err != nil {
-		return fmt.Errorf("psql not found in PATH: %w", err)
+	if _, err := exec.LookPath("pg_restore"); err != nil {
+		return fmt.Errorf("pg_restore not found in PATH: %w", err)
 	}
 
 	schemaPath := r.store.SchemaPath(dumpID)
-	cmd := exec.CommandContext(ctx, "psql",
+	cmd := exec.CommandContext(ctx, "pg_restore",
+		"--schema-only",
+		"--no-owner",
+		"--no-privileges",
 		"--dbname", r.targetDSN,
-		"--file", schemaPath,
-		"--single-transaction",
-		"--set", "ON_ERROR_STOP=on",
+		schemaPath,
 	)
+	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()

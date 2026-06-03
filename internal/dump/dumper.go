@@ -14,6 +14,8 @@ import (
 	"github.com/bojin/datamask/internal/storage"
 )
 
+const schemaFileName = "schema.dump"
+
 type Dumper struct {
 	cfg     *config.Config
 	store   *storage.Store
@@ -87,7 +89,7 @@ func (d *Dumper) Run(ctx context.Context) error {
 		CreatedAt:  start,
 		SourceDB:   dbName,
 		Tables:     tableMetas,
-		SchemaFile: "schema.sql",
+		SchemaFile: schemaFileName,
 		Duration:   time.Since(start),
 	}
 
@@ -106,22 +108,15 @@ func (d *Dumper) exportSchema(ctx context.Context, dumpDir string) error {
 		return fmt.Errorf("pg_dump not found in PATH: %w", err)
 	}
 
-	outFile := filepath.Join(dumpDir, "schema.sql")
+	outFile := filepath.Join(dumpDir, schemaFileName)
 	cmd := exec.CommandContext(ctx, "pg_dump",
-		"--format=plain",
+		"--format=custom",
 		"--schema-only",
 		"--no-owner",
 		"--no-privileges",
+		"--file", outFile,
 		"--dbname", d.dsn,
 	)
-
-	out, err := os.Create(outFile)
-	if err != nil {
-		return fmt.Errorf("creating schema file: %w", err)
-	}
-	defer out.Close()
-
-	cmd.Stdout = out
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()

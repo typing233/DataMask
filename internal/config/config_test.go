@@ -50,7 +50,7 @@ tables:
 	}
 
 	dsn := cfg.Connection.DSN()
-	if dsn != "host=localhost port=5432 user=testuser password=testpass dbname=testdb sslmode=disable" {
+	if dsn != "host=localhost port=5432 user=testuser dbname=testdb sslmode=disable password=testpass" {
 		t.Errorf("DSN: got %q", dsn)
 	}
 }

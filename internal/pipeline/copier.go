@@ -60,11 +60,12 @@ func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult,
 
 	pr, pw := io.Pipe()
 
-	var copyErr error
+	copyErrCh := make(chan error, 1)
 	go func() {
 		defer pw.Close()
 		rawConn := conn.PgConn()
-		_, copyErr = rawConn.CopyTo(ctx, pw, copySQL)
+		_, err := rawConn.CopyTo(ctx, pw, copySQL)
+		copyErrCh <- err
 	}()
 
 	var rowCount int64
@@ -73,9 +74,6 @@ func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult,
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "\\." {
-			break
-		}
 
 		transformed, err := TransformRow(line, params.Columns, params.ColumnTypes, params.Table, transformers)
 		if err != nil {
@@ -96,15 +94,15 @@ func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult,
 		return nil, fmt.Errorf("scanning COPY output: %w", err)
 	}
 
+	if copyErr := <-copyErrCh; copyErr != nil {
+		return nil, fmt.Errorf("COPY TO: %w", copyErr)
+	}
+
 	if err := gzw.Close(); err != nil {
 		return nil, fmt.Errorf("closing gzip: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		return nil, fmt.Errorf("closing file: %w", err)
-	}
-
-	if copyErr != nil {
-		return nil, fmt.Errorf("COPY TO: %w", copyErr)
 	}
 
 	stat, _ := os.Stat(dataFilePath)
