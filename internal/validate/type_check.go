@@ -12,11 +12,21 @@ func (v *Validator) CheckTypes(ctx context.Context) []Finding {
 	var findings []Finding
 
 	if v.db == nil {
+		findings = append(findings, Finding{
+			Severity: SeverityError,
+			Category: "type",
+			Message:  "database connection unavailable: cannot perform type compatibility check",
+		})
 		return findings
 	}
 
 	tables, err := v.db.DiscoverTables(ctx)
 	if err != nil {
+		findings = append(findings, Finding{
+			Severity: SeverityError,
+			Category: "type",
+			Message:  fmt.Sprintf("failed to discover tables: %v", err),
+		})
 		return findings
 	}
 

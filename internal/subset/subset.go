@@ -69,66 +69,69 @@ func (e *Extractor) Plan(ctx context.Context) (*SubsetPlan, error) {
 		e.graph.AddEdge(from, to)
 	}
 
+	cycles := e.graph.FindCycles()
+
 	plan := &SubsetPlan{
-		SeedTables:   make(map[string]string),
-		Dependencies: make(map[string][]Dependency),
-		TableColumns: tableColumns,
+		SeedTables:     make(map[string]string),
+		ParentDeps:     make(map[string][]Dependency),
+		ChildDeps:      make(map[string][]Dependency),
+		TableColumns:   tableColumns,
+		ForeignKeys:    fks,
+		CyclicTables:   make(map[string]bool),
+		CycleGroups:    cycles,
+	}
+
+	for _, cycle := range cycles {
+		for _, t := range cycle {
+			plan.CyclicTables[t] = true
+		}
 	}
 
 	for tableName, ts := range e.config.Tables {
 		plan.SeedTables[tableName] = ts.Where
 	}
 
-	if e.config.ResolveParents {
-		e.resolveDependencies(plan)
-	}
+	e.buildDependencyMap(plan)
 
 	return plan, nil
 }
 
-func (e *Extractor) resolveDependencies(plan *SubsetPlan) {
-	visited := make(map[string]bool)
-	queue := make([]string, 0, len(plan.SeedTables))
+func (e *Extractor) buildDependencyMap(plan *SubsetPlan) {
+	for _, fk := range e.fks {
+		from := fk.FromFullName()
+		to := fk.ToFullName()
 
-	for tableName := range plan.SeedTables {
-		queue = append(queue, tableName)
-		visited[tableName] = true
-	}
+		// Parent dependency: from table references to table
+		plan.ParentDeps[from] = append(plan.ParentDeps[from], Dependency{
+			FromTable:   from,
+			FromColumns: fk.FromColumns,
+			ToTable:     to,
+			ToColumns:   fk.ToColumns,
+		})
 
-	depth := 0
-	for len(queue) > 0 && depth < e.config.MaxDepth {
-		nextQueue := []string{}
-		for _, tableName := range queue {
-			for _, fk := range e.fks {
-				fromName := fk.FromFullName()
-				toName := fk.ToFullName()
-
-				if fromName == tableName && !visited[toName] {
-					visited[toName] = true
-					nextQueue = append(nextQueue, toName)
-					plan.Dependencies[tableName] = append(plan.Dependencies[tableName], Dependency{
-						FromTable:   fromName,
-						FromColumns: fk.FromColumns,
-						ToTable:     toName,
-						ToColumns:   fk.ToColumns,
-					})
-				}
-			}
-		}
-		queue = nextQueue
-		depth++
+		// Child dependency: to table is referenced by from table
+		plan.ChildDeps[to] = append(plan.ChildDeps[to], Dependency{
+			FromTable:   from,
+			FromColumns: fk.FromColumns,
+			ToTable:     to,
+			ToColumns:   fk.ToColumns,
+		})
 	}
 }
 
 type SubsetPlan struct {
 	SeedTables   map[string]string
-	Dependencies map[string][]Dependency
+	ParentDeps   map[string][]Dependency // table -> FKs pointing from this table to parents
+	ChildDeps    map[string][]Dependency // table -> FKs pointing to this table from children
 	TableColumns map[string][]database.ColumnInfo
+	ForeignKeys  []database.ForeignKey
+	CyclicTables map[string]bool
+	CycleGroups  [][]string
 }
 
 type Dependency struct {
 	FromTable   string
-	FromColumns []string
+	FromColumns []string // columns in the referencing (child) table
 	ToTable     string
-	ToColumns   []string
+	ToColumns   []string // columns in the referenced (parent) table
 }

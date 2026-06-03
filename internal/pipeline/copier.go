@@ -26,6 +26,7 @@ type CopyResult struct {
 	RowCount       int64
 	DataFile       string
 	CompressedSize int64
+	OriginalSize   int64
 }
 
 func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult, error) {
@@ -69,6 +70,7 @@ func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult,
 	}()
 
 	var rowCount int64
+	var originalSize int64
 	scanner := bufio.NewScanner(pr)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 
@@ -81,11 +83,10 @@ func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult,
 			return nil, fmt.Errorf("transforming row: %w", err)
 		}
 
-		if _, err := gzw.Write([]byte(transformed)); err != nil {
+		data := []byte(transformed + "\n")
+		originalSize += int64(len(data))
+		if _, err := gzw.Write(data); err != nil {
 			return nil, fmt.Errorf("writing compressed data: %w", err)
-		}
-		if _, err := gzw.Write([]byte("\n")); err != nil {
-			return nil, fmt.Errorf("writing newline: %w", err)
 		}
 		rowCount++
 	}
@@ -115,5 +116,6 @@ func CopyTableToFile(ctx context.Context, params CopyToFileParams) (*CopyResult,
 		RowCount:       rowCount,
 		DataFile:       dataFileName,
 		CompressedSize: compressedSize,
+		OriginalSize:   originalSize,
 	}, nil
 }

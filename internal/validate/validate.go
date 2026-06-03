@@ -61,11 +61,9 @@ func New(cfg *config.Config, db database.Database, dsn string, sampleRows int) *
 func (v *Validator) RunAll(ctx context.Context) []Finding {
 	var findings []Finding
 	findings = append(findings, v.CheckConfig()...)
-	if v.db != nil {
-		findings = append(findings, v.CheckSchema(ctx)...)
-		findings = append(findings, v.CheckTypes(ctx)...)
-		findings = append(findings, v.CheckDiff(ctx)...)
-	}
+	findings = append(findings, v.CheckSchema(ctx)...)
+	findings = append(findings, v.CheckTypes(ctx)...)
+	findings = append(findings, v.CheckDiff(ctx)...)
 	return findings
 }
 

@@ -76,3 +76,52 @@ func TestBuildTransformersUnknown(t *testing.T) {
 		t.Error("expected error for unknown transformer")
 	}
 }
+
+func TestTransformRowIntCodecRejectsInvalidOutput(t *testing.T) {
+	columns := []string{"id", "count"}
+	columnTypes := []string{"integer", "integer"}
+
+	// redact on integer column should fail because "***REDACTED***" is not a valid integer
+	transforms := map[string]string{"count": "redact"}
+	transformers, err := BuildTransformers(columns, transforms)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := "1\t42"
+	_, err = TransformRow(line, columns, columnTypes, "stats", transformers)
+	if err == nil {
+		t.Fatal("expected encode error when redacting an integer column")
+	}
+	if !strings.Contains(err.Error(), "encode error") {
+		t.Errorf("expected encode error message, got: %v", err)
+	}
+}
+
+func TestTransformRowPreserveIntegerPass(t *testing.T) {
+	columns := []string{"id", "count"}
+	columnTypes := []string{"integer", "integer"}
+
+	// random-int on integer column should succeed because it outputs valid integers
+	transforms := map[string]string{"count": "random-int"}
+	transformers, err := BuildTransformers(columns, transforms)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := "1\t42"
+	result, err := TransformRow(line, columns, columnTypes, "stats", transformers)
+	if err != nil {
+		t.Fatalf("random-int on integer column should succeed, got: %v", err)
+	}
+
+	fields := strings.Split(result, "\t")
+	if fields[0] != "1" {
+		t.Errorf("id should be preserved, got %q", fields[0])
+	}
+	// count should be a different integer (almost certainly)
+	if fields[1] == "" {
+		t.Error("count should have a value")
+	}
+}
+

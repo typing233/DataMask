@@ -22,7 +22,7 @@ func (c *IntCodec) CanHandle(pgType string) bool {
 func (c *IntCodec) Decode(raw string, pgType string) (interface{}, error) {
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse %q as integer: %w", raw, err)
 	}
 	return v, nil
 }
@@ -34,14 +34,17 @@ func (c *IntCodec) Encode(value interface{}, pgType string) (string, error) {
 	case int:
 		return strconv.Itoa(v), nil
 	case float64:
+		if v != float64(int64(v)) {
+			return "", fmt.Errorf("cannot encode float %v as integer: value has fractional part", v)
+		}
 		return strconv.FormatInt(int64(v), 10), nil
 	case string:
 		if _, err := strconv.ParseInt(v, 10, 64); err != nil {
-			return "", fmt.Errorf("invalid integer value: %q", v)
+			return "", fmt.Errorf("cannot encode %q as integer: %w", v, err)
 		}
 		return v, nil
 	default:
-		return fmt.Sprintf("%v", v), nil
+		return "", fmt.Errorf("cannot encode %T as integer", value)
 	}
 }
 
@@ -58,7 +61,7 @@ func (c *FloatCodec) CanHandle(pgType string) bool {
 func (c *FloatCodec) Decode(raw string, pgType string) (interface{}, error) {
 	v, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse %q as numeric: %w", raw, err)
 	}
 	return v, nil
 }
@@ -69,13 +72,15 @@ func (c *FloatCodec) Encode(value interface{}, pgType string) (string, error) {
 		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	case int64:
 		return strconv.FormatInt(v, 10), nil
+	case int:
+		return strconv.Itoa(v), nil
 	case string:
 		if _, err := strconv.ParseFloat(v, 64); err != nil {
-			return "", fmt.Errorf("invalid numeric value: %q", v)
+			return "", fmt.Errorf("cannot encode %q as numeric: %w", v, err)
 		}
 		return v, nil
 	default:
-		return fmt.Sprintf("%v", v), nil
+		return "", fmt.Errorf("cannot encode %T as numeric", value)
 	}
 }
 
@@ -92,7 +97,7 @@ func (c *BoolCodec) Decode(raw string, pgType string) (interface{}, error) {
 	case "f", "false", "0", "no", "off":
 		return false, nil
 	default:
-		return nil, fmt.Errorf("invalid boolean: %q", raw)
+		return nil, fmt.Errorf("cannot parse %q as boolean", raw)
 	}
 }
 
@@ -110,10 +115,10 @@ func (c *BoolCodec) Encode(value interface{}, pgType string) (string, error) {
 		case "f", "false", "0", "no", "off":
 			return "f", nil
 		default:
-			return "", fmt.Errorf("invalid boolean value: %q", v)
+			return "", fmt.Errorf("cannot encode %q as boolean", v)
 		}
 	default:
-		return fmt.Sprintf("%v", v), nil
+		return "", fmt.Errorf("cannot encode %T as boolean", value)
 	}
 }
 
@@ -125,21 +130,28 @@ func (c *TimestampCodec) CanHandle(pgType string) bool {
 		t == "timestamp" || t == "timestamptz"
 }
 
+var timestampFormats = []string{
+	"2006-01-02 15:04:05.999999-07",
+	"2006-01-02 15:04:05.999999+07",
+	"2006-01-02 15:04:05.999999-07:00",
+	"2006-01-02 15:04:05.999999+07:00",
+	"2006-01-02 15:04:05.999999",
+	"2006-01-02 15:04:05-07",
+	"2006-01-02 15:04:05+07",
+	"2006-01-02 15:04:05-07:00",
+	"2006-01-02 15:04:05+07:00",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05.999999Z",
+	"2006-01-02T15:04:05Z",
+}
+
 func (c *TimestampCodec) Decode(raw string, pgType string) (interface{}, error) {
-	formats := []string{
-		"2006-01-02 15:04:05.999999-07",
-		"2006-01-02 15:04:05.999999+07",
-		"2006-01-02 15:04:05.999999",
-		"2006-01-02 15:04:05-07",
-		"2006-01-02 15:04:05+07",
-		"2006-01-02 15:04:05",
-	}
-	for _, f := range formats {
+	for _, f := range timestampFormats {
 		if t, err := time.Parse(f, raw); err == nil {
 			return t, nil
 		}
 	}
-	return raw, nil
+	return nil, fmt.Errorf("cannot parse %q as timestamp", raw)
 }
 
 func (c *TimestampCodec) Encode(value interface{}, pgType string) (string, error) {
@@ -150,9 +162,15 @@ func (c *TimestampCodec) Encode(value interface{}, pgType string) (string, error
 		}
 		return v.Format("2006-01-02 15:04:05.999999"), nil
 	case string:
-		return v, nil
+		// Validate the string is a valid timestamp
+		for _, f := range timestampFormats {
+			if _, err := time.Parse(f, v); err == nil {
+				return v, nil
+			}
+		}
+		return "", fmt.Errorf("cannot encode %q as timestamp: invalid format", v)
 	default:
-		return fmt.Sprintf("%v", v), nil
+		return "", fmt.Errorf("cannot encode %T as timestamp", value)
 	}
 }
 
@@ -165,7 +183,7 @@ func (c *DateCodec) CanHandle(pgType string) bool {
 func (c *DateCodec) Decode(raw string, pgType string) (interface{}, error) {
 	t, err := time.Parse("2006-01-02", raw)
 	if err != nil {
-		return raw, nil
+		return nil, fmt.Errorf("cannot parse %q as date: %w", raw, err)
 	}
 	return t, nil
 }
@@ -175,9 +193,12 @@ func (c *DateCodec) Encode(value interface{}, pgType string) (string, error) {
 	case time.Time:
 		return v.Format("2006-01-02"), nil
 	case string:
+		if _, err := time.Parse("2006-01-02", v); err != nil {
+			return "", fmt.Errorf("cannot encode %q as date: %w", v, err)
+		}
 		return v, nil
 	default:
-		return fmt.Sprintf("%v", v), nil
+		return "", fmt.Errorf("cannot encode %T as date", value)
 	}
 }
 
@@ -191,7 +212,7 @@ func (c *ByteaCodec) Decode(raw string, pgType string) (interface{}, error) {
 	if strings.HasPrefix(raw, "\\x") {
 		b, err := hex.DecodeString(raw[2:])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("cannot decode bytea hex: %w", err)
 		}
 		return b, nil
 	}
@@ -205,7 +226,7 @@ func (c *ByteaCodec) Encode(value interface{}, pgType string) (string, error) {
 	case string:
 		return v, nil
 	default:
-		return fmt.Sprintf("%v", v), nil
+		return "", fmt.Errorf("cannot encode %T as bytea", value)
 	}
 }
 
@@ -217,11 +238,10 @@ func (c *JSONCodec) CanHandle(pgType string) bool {
 }
 
 func (c *JSONCodec) Decode(raw string, pgType string) (interface{}, error) {
-	var v json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
-		return raw, nil
+	if !json.Valid([]byte(raw)) {
+		return nil, fmt.Errorf("cannot parse %q as JSON: invalid syntax", truncateForError(raw))
 	}
-	return v, nil
+	return json.RawMessage(raw), nil
 }
 
 func (c *JSONCodec) Encode(value interface{}, pgType string) (string, error) {
@@ -229,11 +249,15 @@ func (c *JSONCodec) Encode(value interface{}, pgType string) (string, error) {
 	case json.RawMessage:
 		return string(v), nil
 	case string:
+		// For JSON columns, the string must be valid JSON
+		if !json.Valid([]byte(v)) {
+			return "", fmt.Errorf("cannot encode as JSON: %q is not valid JSON", truncateForError(v))
+		}
 		return v, nil
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("cannot encode %T as JSON: %w", value, err)
 		}
 		return string(b), nil
 	}
@@ -270,4 +294,11 @@ func normalizeType(pgType string) string {
 		return base
 	}
 	return t
+}
+
+func truncateForError(s string) string {
+	if len(s) > 50 {
+		return s[:47] + "..."
+	}
+	return s
 }

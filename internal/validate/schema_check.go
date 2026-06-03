@@ -9,6 +9,11 @@ func (v *Validator) CheckSchema(ctx context.Context) []Finding {
 	var findings []Finding
 
 	if v.db == nil {
+		findings = append(findings, Finding{
+			Severity: SeverityError,
+			Category: "schema",
+			Message:  "database connection unavailable: cannot perform schema validation",
+		})
 		return findings
 	}
 

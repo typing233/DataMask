@@ -13,6 +13,7 @@ import (
 	"github.com/bojin/datamask/internal/pipeline"
 	"github.com/bojin/datamask/internal/storage"
 	"github.com/jackc/pgx/v5"
+	"gopkg.in/yaml.v3"
 )
 
 const schemaFileName = "schema.dump"
@@ -87,19 +88,22 @@ func (d *Dumper) Run(ctx context.Context) error {
 	}
 	wg.Wait()
 
+	configYAML, _ := yaml.Marshal(d.cfg)
+
 	dumpMeta := &storage.DumpMetadata{
-		ID:          filepath.Base(dumpDir),
-		CreatedAt:   start,
-		SourceDB:    dbName,
-		Tables:      tableMetas,
-		SchemaFile:  schemaFileName,
-		Duration:    time.Since(start),
-		Description: d.Description,
-		Version:     "0.2.0",
-		Tags:        d.Tags,
-		TotalRows:   computeTotalRows(tableMetas),
-		TotalSize:   computeTotalSize(tableMetas),
-		PGVersion:   d.getPGVersion(ctx),
+		ID:             filepath.Base(dumpDir),
+		CreatedAt:      start,
+		SourceDB:       dbName,
+		Tables:         tableMetas,
+		SchemaFile:     schemaFileName,
+		Duration:       time.Since(start),
+		Description:    d.Description,
+		Version:        "0.2.0",
+		Tags:           d.Tags,
+		TotalRows:      computeTotalRows(tableMetas),
+		TotalSize:      computeTotalSize(tableMetas),
+		PGVersion:      d.getPGVersion(ctx),
+		ConfigSnapshot: string(configYAML),
 	}
 
 	if err := d.store.WriteMetadata(dumpDir, dumpMeta); err != nil {
@@ -132,6 +136,8 @@ func (d *Dumper) exportSchema(ctx context.Context, dumpDir string) error {
 }
 
 func (d *Dumper) dumpTable(ctx context.Context, dataDir string, tbl TableInfo) (*storage.TableMeta, error) {
+	tableStart := time.Now()
+
 	transforms := make(map[string]string)
 	if tblCfg := d.cfg.GetTableConfig(tbl.Name); tblCfg != nil {
 		transforms = tblCfg.Columns
@@ -162,6 +168,8 @@ func (d *Dumper) dumpTable(ctx context.Context, dataDir string, tbl TableInfo) (
 		Transformers:   transforms,
 		DataFile:       result.DataFile,
 		CompressedSize: result.CompressedSize,
+		DumpDuration:   time.Since(tableStart),
+		OriginalSize:   result.OriginalSize,
 	}
 	return meta, nil
 }

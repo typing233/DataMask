@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/bojin/datamask/internal/codec"
@@ -8,43 +9,10 @@ import (
 )
 
 func TransformRow(line string, columns []string, columnTypes []string, tableName string, transformers []transformer.Transformer) (string, error) {
-	fields := strings.Split(line, "\t")
-
-	for i, t := range transformers {
-		if t == nil || i >= len(fields) {
-			continue
-		}
-		if fields[i] == "\\N" {
-			continue
-		}
-		colName := ""
-		if i < len(columns) {
-			colName = columns[i]
-		}
-		colType := ""
-		if i < len(columnTypes) {
-			colType = columnTypes[i]
-		}
-		val, err := t.Transform(fields[i], transformer.ColumnInfo{
-			TableName:  tableName,
-			ColumnName: colName,
-			DataType:   colType,
-			Position:   i,
-		})
-		if err != nil {
-			return "", err
-		}
-		fields[i] = val
-	}
-
-	return strings.Join(fields, "\t"), nil
+	return TransformRowTyped(line, columns, columnTypes, tableName, transformers, codec.NewPostgresRegistry())
 }
 
 func TransformRowTyped(line string, columns []string, columnTypes []string, tableName string, transformers []transformer.Transformer, registry *codec.Registry) (string, error) {
-	if registry == nil {
-		return TransformRow(line, columns, columnTypes, tableName, transformers)
-	}
-
 	fields := strings.Split(line, "\t")
 
 	for i, t := range transformers {
@@ -63,11 +31,13 @@ func TransformRowTyped(line string, columns []string, columnTypes []string, tabl
 			colType = columnTypes[i]
 		}
 
-		decoded, err := registry.Decode(fields[i], colType)
+		// Decode: verify the raw value is valid for this column type
+		_, err := registry.Decode(fields[i], colType)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("column %q (type %s): decode error: %w", colName, colType, err)
 		}
 
+		// Transform: transformer works on the raw COPY text value
 		val, err := t.Transform(fields[i], transformer.ColumnInfo{
 			TableName:  tableName,
 			ColumnName: colName,
@@ -75,17 +45,16 @@ func TransformRowTyped(line string, columns []string, columnTypes []string, tabl
 			Position:   i,
 		})
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("column %q: transform error: %w", colName, err)
 		}
 
+		// Encode: verify the transformed output is valid for this column type
 		encodedVal := &codec.Value{Native: val}
 		encoded, err := registry.Encode(encodedVal, colType)
 		if err != nil {
-			_ = decoded
-			fields[i] = val
-		} else {
-			fields[i] = encoded
+			return "", fmt.Errorf("column %q (type %s): encode error after transform: value %q is not valid for type: %w", colName, colType, val, err)
 		}
+		fields[i] = encoded
 	}
 
 	return strings.Join(fields, "\t"), nil

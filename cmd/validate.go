@@ -51,16 +51,26 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	dbChecksRequested := containsAny(checks, "schema", "types", "diff")
+	needsDB := len(checks) == 0 || dbChecksRequested
+
 	var db database.Database
-	needsDB := len(checks) == 0 || containsAny(checks, "schema", "types", "diff")
 	if needsDB {
-		db, err = database.GetDriver("postgres")
-		if err == nil {
-			if connErr := db.Connect(ctx, dsn); connErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not connect to database: %v\n", connErr)
+		dbInst, driverErr := database.GetDriver("postgres")
+		if driverErr != nil {
+			if dbChecksRequested {
+				return fmt.Errorf("database driver unavailable, cannot run requested checks: %w", driverErr)
+			}
+			fmt.Fprintf(os.Stderr, "Note: database driver unavailable, skipping db-dependent checks\n\n")
+		} else {
+			if connErr := dbInst.Connect(ctx, dsn); connErr != nil {
+				if dbChecksRequested {
+					return fmt.Errorf("cannot connect to database (required for requested checks): %w", connErr)
+				}
+				fmt.Fprintf(os.Stderr, "Note: cannot connect to database: %v\n", connErr)
 				fmt.Fprintf(os.Stderr, "Schema, type, and diff checks will be skipped.\n\n")
-				db = nil
 			} else {
+				db = dbInst
 				defer db.Close(ctx)
 			}
 		}
@@ -76,7 +86,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(findings) == 0 {
-		fmt.Println("✓ All checks passed")
+		fmt.Println("All checks passed")
 		return nil
 	}
 

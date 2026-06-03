@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bojin/datamask/internal/codec"
 	"github.com/bojin/datamask/internal/config"
 	"github.com/bojin/datamask/internal/database"
 	"github.com/bojin/datamask/internal/pipeline"
@@ -18,14 +19,18 @@ import (
 	"github.com/bojin/datamask/internal/subset"
 	"github.com/klauspost/pgzip"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var subsetCmd = &cobra.Command{
 	Use:   "subset",
 	Short: "Extract a subset of data based on conditions",
 	Long: `Extract a consistent subset of database records based on user-defined SQL WHERE
-conditions. Automatically resolves foreign key dependencies to ensure referential
-integrity of the extracted subset. The result is stored as a standard dump.`,
+conditions. Automatically resolves foreign key dependencies (both parent and child
+tables) to ensure referential integrity of the extracted subset.
+
+Uses graph algorithms to detect circular references and prevent infinite traversal.
+The result is stored as a standard dump compatible with the restore command.`,
 	RunE: runSubset,
 }
 
@@ -86,7 +91,19 @@ func runSubset(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("planning subset: %w", err)
 	}
-	fmt.Printf("done (%d seed tables, %d dependency paths)\n", len(plan.SeedTables), len(plan.Dependencies))
+
+	depCount := 0
+	for _, deps := range plan.ParentDeps {
+		depCount += len(deps)
+	}
+	for _, deps := range plan.ChildDeps {
+		depCount += len(deps)
+	}
+	fmt.Printf("done (%d seed tables, %d FK relationships", len(plan.SeedTables), depCount)
+	if len(plan.CycleGroups) > 0 {
+		fmt.Printf(", %d cycle group(s) detected", len(plan.CycleGroups))
+	}
+	fmt.Println(")")
 
 	fmt.Print("Resolving data dependencies... ")
 	resolver := subset.NewResolver(db, plan, subCfg)
@@ -123,6 +140,7 @@ func runSubset(cmd *cobra.Command, args []string) error {
 
 	dataDir := filepath.Join(dumpDir, "data")
 	var tableMetas []storage.TableMeta
+	codecRegistry := codec.NewPostgresRegistry()
 
 	for tableName, buf := range results {
 		if buf.Len() == 0 {
@@ -165,6 +183,7 @@ func runSubset(cmd *cobra.Command, args []string) error {
 
 		transformers, err := pipeline.BuildTransformers(colNames, transforms)
 		if err != nil {
+			gzw.Close()
 			f.Close()
 			return fmt.Errorf("building transformers for %s: %w", tableName, err)
 		}
@@ -177,7 +196,7 @@ func runSubset(cmd *cobra.Command, args []string) error {
 			if line == "" {
 				continue
 			}
-			transformed, err := pipeline.TransformRow(line, colNames, colTypes, table, transformers)
+			transformed, err := pipeline.TransformRowTyped(line, colNames, colTypes, table, transformers, codecRegistry)
 			if err != nil {
 				gzw.Close()
 				f.Close()
@@ -209,18 +228,21 @@ func runSubset(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  ✓ %s (%d rows)\n", tableName, rowCount)
 	}
 
+	configYAML, _ := yaml.Marshal(cfg)
+
 	dumpMeta := &storage.DumpMetadata{
-		ID:          filepath.Base(dumpDir),
-		CreatedAt:   start,
-		SourceDB:    cfg.Connection.DBName,
-		Tables:      tableMetas,
-		SchemaFile:  "schema.dump",
-		Duration:    time.Since(start),
-		Description: description,
-		Version:     "0.2.0",
-		TotalRows:   computeSubsetTotalRows(tableMetas),
-		TotalSize:   computeSubsetTotalSize(tableMetas),
-		PGVersion:   db.ServerVersion(ctx),
+		ID:             filepath.Base(dumpDir),
+		CreatedAt:      start,
+		SourceDB:       cfg.Connection.DBName,
+		Tables:         tableMetas,
+		SchemaFile:     "schema.dump",
+		Duration:       time.Since(start),
+		Description:    description,
+		Version:        "0.2.0",
+		TotalRows:      computeSubsetTotalRows(tableMetas),
+		TotalSize:      computeSubsetTotalSize(tableMetas),
+		PGVersion:      db.ServerVersion(ctx),
+		ConfigSnapshot: string(configYAML),
 	}
 
 	if err := store.WriteMetadata(dumpDir, dumpMeta); err != nil {
