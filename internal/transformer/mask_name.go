@@ -30,3 +30,25 @@ func (m *maskName) Transform(value string, col ColumnInfo) (string, error) {
 	last := lastNames[(idx/uint32(len(firstNames)))%uint32(len(lastNames))]
 	return first + " " + last, nil
 }
+
+func (m *maskName) Description() string {
+	return "Deterministically replaces names with synthetic first+last name pairs"
+}
+
+func (m *maskName) DetailedHelp() string {
+	return `Maps input values to synthetic names from a fixed pool using SHA-256 hashing.
+Produces consistent "FirstName LastName" output for any given input.
+Deterministic: same input always produces the same output.
+Pool size: 18 first names x 18 last names = 324 unique combinations.`
+}
+
+func (m *maskName) SupportedTypes() []string {
+	return []string{"text", "varchar", "character varying"}
+}
+
+func (m *maskName) Examples() []Example {
+	return []Example{
+		{Input: "Alice Johnson", Output: "William Garcia", DataType: "text"},
+		{Input: "Bob Smith", Output: "Emma Davis", DataType: "varchar"},
+	}
+}

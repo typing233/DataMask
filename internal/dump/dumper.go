@@ -12,15 +12,18 @@ import (
 	"github.com/bojin/datamask/internal/config"
 	"github.com/bojin/datamask/internal/pipeline"
 	"github.com/bojin/datamask/internal/storage"
+	"github.com/jackc/pgx/v5"
 )
 
 const schemaFileName = "schema.dump"
 
 type Dumper struct {
-	cfg     *config.Config
-	store   *storage.Store
-	dsn     string
-	suffix  string
+	cfg         *config.Config
+	store       *storage.Store
+	dsn         string
+	suffix      string
+	Description string
+	Tags        []string
 }
 
 func New(cfg *config.Config, store *storage.Store, dsn, suffix string) *Dumper {
@@ -85,12 +88,18 @@ func (d *Dumper) Run(ctx context.Context) error {
 	wg.Wait()
 
 	dumpMeta := &storage.DumpMetadata{
-		ID:         filepath.Base(dumpDir),
-		CreatedAt:  start,
-		SourceDB:   dbName,
-		Tables:     tableMetas,
-		SchemaFile: schemaFileName,
-		Duration:   time.Since(start),
+		ID:          filepath.Base(dumpDir),
+		CreatedAt:   start,
+		SourceDB:    dbName,
+		Tables:      tableMetas,
+		SchemaFile:  schemaFileName,
+		Duration:    time.Since(start),
+		Description: d.Description,
+		Version:     "0.2.0",
+		Tags:        d.Tags,
+		TotalRows:   computeTotalRows(tableMetas),
+		TotalSize:   computeTotalSize(tableMetas),
+		PGVersion:   d.getPGVersion(ctx),
 	}
 
 	if err := d.store.WriteMetadata(dumpDir, dumpMeta); err != nil {
@@ -155,4 +164,33 @@ func (d *Dumper) dumpTable(ctx context.Context, dataDir string, tbl TableInfo) (
 		CompressedSize: result.CompressedSize,
 	}
 	return meta, nil
+}
+
+func (d *Dumper) getPGVersion(ctx context.Context) string {
+	conn, err := pgx.Connect(ctx, d.dsn)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close(ctx)
+	var version string
+	if err := conn.QueryRow(ctx, "SHOW server_version").Scan(&version); err != nil {
+		return ""
+	}
+	return version
+}
+
+func computeTotalRows(tables []storage.TableMeta) int64 {
+	var total int64
+	for _, t := range tables {
+		total += t.RowCount
+	}
+	return total
+}
+
+func computeTotalSize(tables []storage.TableMeta) int64 {
+	var total int64
+	for _, t := range tables {
+		total += t.CompressedSize
+	}
+	return total
 }

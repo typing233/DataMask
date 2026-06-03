@@ -27,3 +27,11 @@ func List() []string {
 	sort.Strings(names)
 	return names
 }
+
+func GetAll() map[string]Transformer {
+	result := make(map[string]Transformer, len(registry))
+	for k, v := range registry {
+		result[k] = v
+	}
+	return result
+}

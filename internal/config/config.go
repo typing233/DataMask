@@ -15,11 +15,23 @@ type Config struct {
 	ExcludeTables      []string               `yaml:"exclude_tables,omitempty"`
 	IncludeTables      []string               `yaml:"include_tables,omitempty"`
 	Connection         ConnectionConfig       `yaml:"connection"`
+	Subset             *SubsetConfig          `yaml:"subset,omitempty"`
 }
 
 type TableConfig struct {
 	Columns map[string]string `yaml:"columns"`
 	Exclude bool              `yaml:"exclude,omitempty"`
+}
+
+type SubsetConfig struct {
+	Tables          map[string]SubsetTableConfig `yaml:"tables"`
+	ResolveParents  bool                         `yaml:"resolve_parents"`
+	ResolveChildren bool                         `yaml:"resolve_children"`
+	MaxDepth        int                          `yaml:"max_depth"`
+}
+
+type SubsetTableConfig struct {
+	Where string `yaml:"where"`
 }
 
 type ConnectionConfig struct {

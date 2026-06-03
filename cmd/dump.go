@@ -25,6 +25,8 @@ func init() {
 	rootCmd.AddCommand(dumpCmd)
 	dumpCmd.Flags().String("name", "", "optional dump name suffix")
 	dumpCmd.Flags().String("dsn", "", "override connection DSN from config")
+	dumpCmd.Flags().String("description", "", "description for this dump")
+	dumpCmd.Flags().StringSlice("tags", nil, "tags for this dump")
 }
 
 func runDump(cmd *cobra.Command, args []string) error {
@@ -48,11 +50,15 @@ func runDump(cmd *cobra.Command, args []string) error {
 	}
 
 	nameSuffix, _ := cmd.Flags().GetString("name")
+	description, _ := cmd.Flags().GetString("description")
+	tags, _ := cmd.Flags().GetStringSlice("tags")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	d := dump.New(cfg, store, dsn, nameSuffix)
+	d.Description = description
+	d.Tags = tags
 	if err := d.Run(ctx); err != nil {
 		return fmt.Errorf("dump failed: %w", err)
 	}
