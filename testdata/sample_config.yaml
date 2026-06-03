@@ -1,0 +1,36 @@
+# datamask sample configuration
+storage_dir: ./dumps
+parallelism: 4
+
+connection:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: ""
+  dbname: mydb
+  sslmode: prefer
+
+exclude_tables:
+  - schema_migrations
+
+tables:
+  users:
+    columns:
+      email: mask-email
+      first_name: mask-name
+      last_name: mask-name
+      password_hash: redact
+      phone: redact
+      ssn: hash-sha256
+
+  orders:
+    columns:
+      customer_notes: redact
+
+  payments:
+    columns:
+      card_number: redact
+      billing_address: redact
+
+  # audit_log:
+  #   exclude: true
